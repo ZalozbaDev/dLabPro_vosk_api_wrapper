@@ -24,7 +24,7 @@ struct VoskRecognizer
 {
 	int instanceId;
 	int modelInstanceId;
-	float sampleRate;
+	float inputSampleRate;
 };
 
 static int voskRecognizerInstanceId = 1;
@@ -106,8 +106,7 @@ VoskRecognizer *vosk_recognizer_new(VoskModel *model, float sample_rate)
 	instance = (VoskRecognizer*) malloc(sizeof(VoskRecognizer));
 	instance->instanceId = voskRecognizerInstanceId;
 	instance->modelInstanceId = model->instanceId;
-	// instance->sampleRate = sample_rate;
-	instance->sampleRate = 16000.0;
+	instance->inputSampleRate = sample_rate;
 	
 	voskRecognizerInstanceId++;
 	
@@ -137,7 +136,7 @@ int vosk_recognizer_accept_waveform(VoskRecognizer *recognizer, const char *data
 {
 	int retVal;
 	
-	printf("vosk_recognizer_accept_waveform, instance=%d, modelInstaceId=%d, length=%d, sampleRate=%.2f.\n", recognizer->instanceId, recognizer->modelInstanceId, length, recognizer->sampleRate);
+	printf("vosk_recognizer_accept_waveform, instance=%d, modelInstaceId=%d, length=%d, sampleRate=%.2f.\n", recognizer->instanceId, recognizer->modelInstanceId, length, recognizer->inputSampleRate);
 	
 	/*
 	printf("%02X %02X %02X %02X %02X %02X %02X %02X\n",
@@ -179,15 +178,16 @@ int vosk_recognizer_accept_waveform(VoskRecognizer *recognizer, const char *data
 				}
 				*/
 				
-				if ((recognizer->sampleRate != 8000.0) && (recognizer->sampleRate != 16000))
+				if ((recognizer->inputSampleRate != 8000.0) && (recognizer->inputSampleRate != 16000))
 				{
-					printf("Error! Unsupported sample rate=%.2f!\n", recognizer->sampleRate);	
+					printf("Error! Unsupported sample rate=%.2f!\n", recognizer->inputSampleRate);	
 				}
 				
 				audioCallbackBuffer[audioCallbackBufferPtr] = fValue;
 				audioCallbackBufferPtr++;
 				
-				if (recognizer->sampleRate != 16000.0)
+				// double all samples for 8kHz input rate
+				if (recognizer->inputSampleRate != 16000.0)
 				{
 					audioCallbackBuffer[audioCallbackBufferPtr] = fValue;
 					audioCallbackBufferPtr++;
@@ -311,6 +311,8 @@ const char *vosk_recognizer_result(VoskRecognizer *recognizer)
 		strcat(resultBuffer, recognizer_final_result());
 		strcat(resultBuffer, "\" }");
 		
+		recognizer_flush_results();
+		
 		return resultBuffer;
 	}
 	else
@@ -377,6 +379,7 @@ PaError Pa_OpenStream( PaStream** stream,
 	audioStreamCallback = streamCallback;
 	audioStreamUserData = userData;
 	
+	// this is the only format that the dlabpro recognizer accepts
 	assert(inputParameters->sampleFormat == paFloat32);
 	assert(sampleRate == 16000.0);
 	
@@ -396,6 +399,7 @@ PaError Pa_OpenDefaultStream( PaStream** stream,
 	audioStreamCallback = streamCallback;
 	audioStreamUserData = userData;
 
+	// this is the only format that the dlabpro recognizer accepts
 	assert(sampleFormat == paFloat32);
 	assert(sampleRate == 16000.0);
 	
