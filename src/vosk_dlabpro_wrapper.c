@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
+#include <unistd.h>
+#include <string.h>
 
 #include <portaudio.h>
 
@@ -35,6 +37,16 @@ static void* recognizerThread(void* arg)
 {
 	recognizer_main((sizeof(recognizer_argv) / sizeof(char*)), ((char**) &recognizer_argv));
 }
+
+static PaStreamCallback* audioStreamCallback;
+static void* audioStreamUserData;
+
+static int audioDecodingStatus = 0;
+
+static float audioCallbackBuffer[PABUF_SIZE];
+static int audioCallbackBufferPtr = 0;
+
+static char resultBuffer[5000];
 
 VoskModel *vosk_model_new(const char *model_path)
 {
@@ -119,40 +131,181 @@ void vosk_recognizer_set_words(VoskRecognizer *recognizer, int words)
 
 int vosk_recognizer_accept_waveform(VoskRecognizer *recognizer, const char *data, int length)
 {
-	printf("vosk_recognizer_accept_waveform, instance=%d, length=%d.\n", recognizer->instanceId, length);
-	if (silence_ctr < 5)
+	int retVal;
+	
+	printf("vosk_recognizer_accept_waveform, instance=%d, modelInstaceId=%d, length=%d.\n", recognizer->instanceId, recognizer->modelInstanceId, length);
+	
+	/*
+	printf("%02X %02X %02X %02X %02X %02X %02X %02X\n",
+		data[0], data[1], data[2], data[3],
+		data[4], data[5], data[6], data[7]);
+		*/
+	
+	// only serve the first instace
+	if ((recognizer->instanceId == 1) && (recognizer->modelInstanceId == 1))
 	{
-		silence_ctr++;
-		printf("vosk_recognizer_accept_waveform --> continue decoding\n");
-		return 0;
+		int idleCtr = recognizer_get_idle_counter();
+		int busyCtr = recognizer_get_busy_counter();
+		
+		// TODO idle ctr != 0 should be sticky!
+		if (idleCtr != 0)
+		{
+			int dataLength = 0;
+			int callbackCalled = 0;
+			
+			printf("ACCEPT\n");
+			
+			// FIXME how to handle unaligned data?
+			while (dataLength < length)
+			{
+				short value = (short) ((data[dataLength] & 0xFF) | ((data[dataLength + 1] & 0xFF) << 8));
+				
+				/*
+				if (audioCallbackBufferPtr < 10)
+				{
+					printf("(%02X %02X) %.2f ", data[dataLength], data[dataLength + 1], (float) value);
+				}
+				if (audioCallbackBufferPtr == 10)
+				{
+					printf("\n");	
+				}
+				*/
+				
+				audioCallbackBuffer[audioCallbackBufferPtr] = (float) value;
+				audioCallbackBufferPtr++;
+				audioCallbackBuffer[audioCallbackBufferPtr] = (float) value;
+				audioCallbackBufferPtr++;
+				
+				if (audioCallbackBufferPtr == PABUF_SIZE)
+				{
+					audioStreamCallback(audioCallbackBuffer, NULL, PABUF_SIZE, NULL, 0, audioStreamUserData);
+					audioCallbackBufferPtr = 0;
+					callbackCalled = 1;
+				}
+				
+				dataLength += 2;
+			}
+			
+			if (callbackCalled != 0)
+			{
+				while (recognizer_get_busy_counter() == busyCtr)
+				{
+					printf("+");
+					usleep(1000);
+				}
+				printf("\n");
+				
+				idleCtr = recognizer_get_idle_counter();
+				
+				while (recognizer_get_idle_counter() == idleCtr)
+				{
+					printf("-");
+					usleep(1000);
+				}
+				printf("\n");
+	
+				if (recognizer_get_vad_status() == 1)
+				{
+					printf("O ");
+					
+					// we always need more data if VAD is active
+					audioDecodingStatus = 1;
+					retVal = 0;
+				}
+				else
+				{
+					// check if VAD was active before, if yes, we have a result
+					if (audioDecodingStatus == 1) 
+					{
+						retVal = 1;	
+					}
+					else
+					{
+						retVal = 0;	
+					}
+					
+					audioDecodingStatus = 0;
+				}
+			}
+			else
+			{
+				// there wasn't even enough data to send to the recognizer
+				retVal = 0;
+			}
+		}
+		else
+		{
+			printf("IGNORE (not online)\n");
+			
+			// dunno what to return, try "partial"
+			retVal = 0;
+		}
 	}
-	silence_ctr = 0;
-	printf("vosk_recognizer_accept_waveform --> get result\n");
-	return 1;
+	else
+	{
+		printf("REJECT\n");
+		
+		// dunno what to return, try "partial"
+		retVal = 0;
+	}
+	
+	return retVal;
 }
 
-const char *result_text="{ \"text\" : \"Result text\" }";
-
-const char *vosk_recognizer_result(VoskRecognizer *recognizer)
-{
-	printf("vosk_recognizer_result, instance=%d\n", recognizer->instanceId);
-	return result_text;
-}
-
-const char *partial_result_text="{ \"partial\" : \"Partial result text\" }";
+const char *partial_result_text_empty="{ \"partial\" : \"\" }";
 
 const char *vosk_recognizer_partial_result(VoskRecognizer *recognizer)
 {
-	printf("vosk_recognizer_partial_result, instance=%d\n", recognizer->instanceId);
-	return partial_result_text;
+	printf("vosk_recognizer_partial_result, instance=%d, modelInstaceId=%d\n", recognizer->instanceId, recognizer->modelInstanceId);
+	
+	// only serve the first instace
+	if ((recognizer->instanceId == 1) && (recognizer->modelInstanceId == 1))
+	{
+		resultBuffer[0] = 0;
+		
+		printf("Partial result=%s.\n", recognizer_partial_result());
+		
+		strcat(resultBuffer, "{ \"partial\" : \"");
+		strcat(resultBuffer, recognizer_partial_result());
+		strcat(resultBuffer, "\" }");
+		
+		return resultBuffer;
+	}
+	else
+	{
+		return partial_result_text_empty;
+	}
 }
 
-const char *final_result_text="{ \"text\" : \"Final result text\" }";
+const char *result_text_empty="{ \"text\" : \"\" }";
+
+const char *vosk_recognizer_result(VoskRecognizer *recognizer)
+{
+	printf("vosk_recognizer_result, instance=%d, modelInstaceId=%d\n", recognizer->instanceId, recognizer->modelInstanceId);
+
+	// only serve the first instace
+	if ((recognizer->instanceId == 1) && (recognizer->modelInstanceId == 1))
+	{
+		resultBuffer[0] = 0;
+		
+		printf("Result=%s.\n", recognizer_final_result());
+		
+		strcat(resultBuffer, "{ \"text\" : \"");
+		strcat(resultBuffer, recognizer_final_result());
+		strcat(resultBuffer, "\" }");
+		
+		return resultBuffer;
+	}
+	else
+	{
+		return result_text_empty;
+	}
+}
 
 const char *vosk_recognizer_final_result(VoskRecognizer *recognizer)
 {
-	printf("vosk_recognizer_final_result, instance=%d\n", recognizer->instanceId);
-	return final_result_text;
+	printf("vosk_recognizer_final_result, instance=%d, modelInstaceId=%d\n", recognizer->instanceId, recognizer->modelInstanceId);
+	vosk_recognizer_result(recognizer);
 }
 
 //////////////////////////////////////////////////////////////////
@@ -204,6 +357,9 @@ PaError Pa_OpenStream( PaStream** stream,
                        PaStreamCallback *streamCallback,
                        void *userData )
 {
+	audioStreamCallback = streamCallback;
+	audioStreamUserData = userData;
+	
 	return paNoError;
 }
 
@@ -217,6 +373,9 @@ PaError Pa_OpenDefaultStream( PaStream** stream,
                               PaStreamCallback *streamCallback,
                               void *userData )
 {
+	audioStreamCallback = streamCallback;
+	audioStreamUserData = userData;
+	
 	return paNoError;
 }
 
