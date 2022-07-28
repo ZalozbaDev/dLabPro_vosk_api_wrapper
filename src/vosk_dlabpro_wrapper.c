@@ -8,6 +8,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <string.h>
+#include <assert.h>
 
 #include <portaudio.h>
 
@@ -23,6 +24,7 @@ struct VoskRecognizer
 {
 	int instanceId;
 	int modelInstanceId;
+	float sampleRate;
 };
 
 static int voskRecognizerInstanceId = 1;
@@ -31,7 +33,7 @@ static VoskRecognizer dummyRecognizer;
 
 static int silence_ctr = 0;
 
-static char* recognizer_argv[] = {"", "-cfg", "recognizer.cfg", "-out", "res"};  
+static char* recognizer_argv[] = {"", "-cfg", "recognizer.cfg", "-out", "vad"};  
 
 static void* recognizerThread(void* arg)
 {
@@ -104,6 +106,8 @@ VoskRecognizer *vosk_recognizer_new(VoskModel *model, float sample_rate)
 	instance = (VoskRecognizer*) malloc(sizeof(VoskRecognizer));
 	instance->instanceId = voskRecognizerInstanceId;
 	instance->modelInstanceId = model->instanceId;
+	// instance->sampleRate = sample_rate;
+	instance->sampleRate = 16000.0;
 	
 	voskRecognizerInstanceId++;
 	
@@ -133,7 +137,7 @@ int vosk_recognizer_accept_waveform(VoskRecognizer *recognizer, const char *data
 {
 	int retVal;
 	
-	printf("vosk_recognizer_accept_waveform, instance=%d, modelInstaceId=%d, length=%d.\n", recognizer->instanceId, recognizer->modelInstanceId, length);
+	printf("vosk_recognizer_accept_waveform, instance=%d, modelInstaceId=%d, length=%d, sampleRate=%.2f.\n", recognizer->instanceId, recognizer->modelInstanceId, length, recognizer->sampleRate);
 	
 	/*
 	printf("%02X %02X %02X %02X %02X %02X %02X %02X\n",
@@ -159,11 +163,15 @@ int vosk_recognizer_accept_waveform(VoskRecognizer *recognizer, const char *data
 			while (dataLength < length)
 			{
 				short value = (short) ((data[dataLength] & 0xFF) | ((data[dataLength + 1] & 0xFF) << 8));
+				float fValue = (float) value;
+				
+				// float32 format for portaudio means values are between -1.0 and +1.0
+				fValue /= 32768;
 				
 				/*
 				if (audioCallbackBufferPtr < 10)
 				{
-					printf("(%02X %02X) %.2f ", data[dataLength], data[dataLength + 1], (float) value);
+					printf("(%02X %02X) %.2f ", data[dataLength], data[dataLength + 1], fValue);
 				}
 				if (audioCallbackBufferPtr == 10)
 				{
@@ -171,10 +179,19 @@ int vosk_recognizer_accept_waveform(VoskRecognizer *recognizer, const char *data
 				}
 				*/
 				
-				audioCallbackBuffer[audioCallbackBufferPtr] = (float) value;
+				if ((recognizer->sampleRate != 8000.0) && (recognizer->sampleRate != 16000))
+				{
+					printf("Error! Unsupported sample rate=%.2f!\n", recognizer->sampleRate);	
+				}
+				
+				audioCallbackBuffer[audioCallbackBufferPtr] = fValue;
 				audioCallbackBufferPtr++;
-				audioCallbackBuffer[audioCallbackBufferPtr] = (float) value;
-				audioCallbackBufferPtr++;
+				
+				if (recognizer->sampleRate != 16000.0)
+				{
+					audioCallbackBuffer[audioCallbackBufferPtr] = fValue;
+					audioCallbackBufferPtr++;
+				}
 				
 				if (audioCallbackBufferPtr == PABUF_SIZE)
 				{
@@ -360,6 +377,9 @@ PaError Pa_OpenStream( PaStream** stream,
 	audioStreamCallback = streamCallback;
 	audioStreamUserData = userData;
 	
+	assert(inputParameters->sampleFormat == paFloat32);
+	assert(sampleRate == 16000.0);
+	
 	return paNoError;
 }
 
@@ -375,6 +395,9 @@ PaError Pa_OpenDefaultStream( PaStream** stream,
 {
 	audioStreamCallback = streamCallback;
 	audioStreamUserData = userData;
+
+	assert(sampleFormat == paFloat32);
+	assert(sampleRate == 16000.0);
 	
 	return paNoError;
 }
