@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <pthread.h>
 
+#include <portaudio.h>
+
 struct VoskModel
 {
 	int       instanceId;
@@ -152,3 +154,85 @@ const char *vosk_recognizer_final_result(VoskRecognizer *recognizer)
 	printf("vosk_recognizer_final_result, instance=%d\n", recognizer->instanceId);
 	return final_result_text;
 }
+
+//////////////////////////////////////////////////////////////////
+//
+// fake portaudio
+//
+//////////////////////////////////////////////////////////////////
+
+PaDeviceIndex Pa_GetDeviceCount( void )
+{
+	return 1;	
+}
+
+static PaDeviceInfo pdInfo
+{
+	.structVersion = 2,
+	.name = "vosk",
+	.hostApi = 1,
+	.maxInputChannels = 1,
+	.maxOutputChannels = 1,
+	.defaultLowInputLatency = 1.0,
+	.defaultLowOutputLatency = 1.0,
+	.defaultHighInputLatency = 2.0,
+	.defaultHighOutputLatency = 2.0,
+	.defaultSampleRate = 8000.0
+};
+
+const PaDeviceInfo* Pa_GetDeviceInfo( PaDeviceIndex device )
+{
+	return &pdInfo;
+}
+
+PaError Pa_Initialize( void )
+{
+	return paNoError;
+}
+
+PaError Pa_Terminate( void )
+{
+	return paNoError;
+}
+
+PaError Pa_OpenStream( PaStream** stream,
+                       const PaStreamParameters *inputParameters,
+                       const PaStreamParameters *outputParameters,
+                       double sampleRate,
+                       unsigned long framesPerBuffer,
+                       PaStreamFlags streamFlags,
+                       PaStreamCallback *streamCallback,
+                       void *userData )
+{
+	return paNoError;
+}
+
+
+PaError Pa_OpenDefaultStream( PaStream** stream,
+                              int numInputChannels,
+                              int numOutputChannels,
+                              PaSampleFormat sampleFormat,
+                              double sampleRate,
+                              unsigned long framesPerBuffer,
+                              PaStreamCallback *streamCallback,
+                              void *userData )
+{
+	return paNoError;
+}
+
+PaError Pa_CloseStream( PaStream *stream )
+{
+	return paNoError;
+}
+
+PaError Pa_StartStream( PaStream *stream )
+{
+	return paNoError;
+}
+
+PaError Pa_StopStream( PaStream *stream )
+{
+	return paNoError;
+}
+
+
