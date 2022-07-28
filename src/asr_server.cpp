@@ -141,6 +141,11 @@ public:
         {
             return Chunk{vosk_recognizer_final_result(rec_), true};
         }
+        else if ((len < 100) && (strstr(message, "sample_rate") != NULL))
+        {
+        	std::cout << message << "\n";
+        	return Chunk{vosk_recognizer_partial_result(rec_), false};
+        }
         else if (vosk_recognizer_accept_waveform(rec_, message, len))
         {
             return Chunk{vosk_recognizer_result(rec_), false};

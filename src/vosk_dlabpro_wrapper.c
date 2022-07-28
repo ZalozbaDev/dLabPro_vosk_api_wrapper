@@ -178,7 +178,8 @@ int vosk_recognizer_accept_waveform(VoskRecognizer *recognizer, const char *data
 				}
 				*/
 				
-				if ((recognizer->inputSampleRate != 8000.0) && (recognizer->inputSampleRate != 16000))
+				if ((recognizer->inputSampleRate != 8000.0) && (recognizer->inputSampleRate != 16000.0)
+					&& (recognizer->inputSampleRate != 48000.0))
 				{
 					printf("Error! Unsupported sample rate=%.2f!\n", recognizer->inputSampleRate);	
 				}
@@ -187,7 +188,7 @@ int vosk_recognizer_accept_waveform(VoskRecognizer *recognizer, const char *data
 				audioCallbackBufferPtr++;
 				
 				// double all samples for 8kHz input rate
-				if (recognizer->inputSampleRate != 16000.0)
+				if (recognizer->inputSampleRate == 8000.0)
 				{
 					audioCallbackBuffer[audioCallbackBufferPtr] = fValue;
 					audioCallbackBufferPtr++;
@@ -201,6 +202,12 @@ int vosk_recognizer_accept_waveform(VoskRecognizer *recognizer, const char *data
 				}
 				
 				dataLength += 2;
+				
+				// do an ugly downsampling for 48Khz input rate
+				if (recognizer->inputSampleRate == 48000.0)
+				{
+					dataLength += 4;					
+				}
 			}
 			
 			if (callbackCalled != 0)
