@@ -332,7 +332,8 @@ const char *vosk_recognizer_partial_result(VoskRecognizer *recognizer)
 	printf("vosk_recognizer_partial_result, instance=%d, modelInstaceId=%d\n", recognizer->instanceId, recognizer->modelInstanceId);
 	
 	// only serve the active instace
-	if (checkActiveInstance(recognizer) == 1)
+	// do not return partial result if VAD is off
+	if ((checkActiveInstance(recognizer) == 1) && (recognizer_get_vad_status() == 1))
 	{
 		resultBuffer[0] = 0;
 		
