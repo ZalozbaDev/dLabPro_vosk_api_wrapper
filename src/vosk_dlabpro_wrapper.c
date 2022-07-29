@@ -364,7 +364,9 @@ const char *vosk_recognizer_result(VoskRecognizer *recognizer)
 		printf("Result=%s.\n", recognizer_final_result());
 		
 		strcat(resultBuffer, "{ \"text\" : \"");
+		strcat(resultBuffer, "-- ");
 		strcat(resultBuffer, recognizer_final_result());
+		strcat(resultBuffer, " --");
 		strcat(resultBuffer, "\" }");
 		
 		recognizer_flush_results();
