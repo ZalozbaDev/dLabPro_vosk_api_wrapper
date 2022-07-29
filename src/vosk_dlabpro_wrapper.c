@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <assert.h>
+#include <sys/time.h>
 
 #include <portaudio.h>
 
@@ -49,6 +50,54 @@ static float audioCallbackBuffer[PABUF_SIZE];
 static int audioCallbackBufferPtr = 0;
 
 static char resultBuffer[5000];
+
+struct InstanceActivity
+{
+	int instanceId;
+	int modelInstanceId;
+	struct timeval activeTime;
+};
+
+static struct InstanceActivity activeInstance
+{
+	.instanceId         = -1,
+	.modelInstanceId    = -1,
+	.activeTime         = { .tv_sec  = 0, .tv_usec = 0 }
+};
+
+static int checkActiveInstance(VoskRecognizer *recognizer)
+{
+	struct timeval currTime;
+	int acceptInstance = 0;
+
+	if (gettimeofday(&currTime, NULL) != 0)
+	{
+		printf("Error in gettimeofday()!\n");	
+	}
+	
+	// same instance --> just refresh times
+	if ((recognizer->instanceId == activeInstance.instanceId) && (recognizer->modelInstanceId == activeInstance.modelInstanceId))
+	{
+		activeInstance.activeTime.tv_sec  = currTime.tv_sec;
+		activeInstance.activeTime.tv_usec = currTime.tv_usec;
+		acceptInstance = 1;
+	}
+	else
+	{
+		// last active instance wasn't active for at least 1..2 seconds, so make this instance the active one
+		if (abs((int) activeInstance.activeTime.tv_sec - (int) 	currTime.tv_sec) > 2)
+		{
+			printf("Changing active instance form %d:%d to %d:%d.\n", activeInstance.instanceId, activeInstance.modelInstanceId, recognizer->instanceId, recognizer->modelInstanceId);
+			activeInstance.instanceId      = recognizer->instanceId;
+			activeInstance.modelInstanceId = recognizer->modelInstanceId;
+			activeInstance.activeTime.tv_sec  = currTime.tv_sec;
+			activeInstance.activeTime.tv_usec = currTime.tv_usec;
+			acceptInstance = 1;
+		}
+	}
+	
+	return acceptInstance;
+}
 
 VoskModel *vosk_model_new(const char *model_path)
 {
@@ -144,8 +193,8 @@ int vosk_recognizer_accept_waveform(VoskRecognizer *recognizer, const char *data
 		data[4], data[5], data[6], data[7]);
 		*/
 	
-	// only serve the first instace
-	if ((recognizer->instanceId == 1) && (recognizer->modelInstanceId == 1))
+	// only serve the active instace
+	if (checkActiveInstance(recognizer) == 1)
 	{
 		int idleCtr = recognizer_get_idle_counter();
 		int busyCtr = recognizer_get_busy_counter();
@@ -282,8 +331,8 @@ const char *vosk_recognizer_partial_result(VoskRecognizer *recognizer)
 {
 	printf("vosk_recognizer_partial_result, instance=%d, modelInstaceId=%d\n", recognizer->instanceId, recognizer->modelInstanceId);
 	
-	// only serve the first instace
-	if ((recognizer->instanceId == 1) && (recognizer->modelInstanceId == 1))
+	// only serve the active instace
+	if (checkActiveInstance(recognizer) == 1)
 	{
 		resultBuffer[0] = 0;
 		
@@ -307,8 +356,8 @@ const char *vosk_recognizer_result(VoskRecognizer *recognizer)
 {
 	printf("vosk_recognizer_result, instance=%d, modelInstaceId=%d\n", recognizer->instanceId, recognizer->modelInstanceId);
 
-	// only serve the first instace
-	if ((recognizer->instanceId == 1) && (recognizer->modelInstanceId == 1))
+	// only serve the active instace
+	if (checkActiveInstance(recognizer) == 1)
 	{
 		resultBuffer[0] = 0;
 		
