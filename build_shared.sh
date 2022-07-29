@@ -5,4 +5,4 @@
 
 rm -f libasr-server.so
 
-g++ -shared -std=c++17 -O3 -fPIC -I./boost_1_76_0/ -I./inc/ -I../dLabPro_vosk_api/programs/recognizer/ -o libasr-server.so src/asr_server.cpp src/vosk_dlabpro_wrapper.c -lpthread -ldl
+g++ -Wall -Wno-write-strings -shared -std=c++17 -O3 -fPIC -I./boost_1_76_0/ -I./inc/ -I../dLabPro_vosk_api/programs/recognizer/ -o libasr-server.so src/asr_server.cpp src/vosk_dlabpro_wrapper.c -lpthread -ldl

@@ -141,8 +141,11 @@ public:
         {
             return Chunk{vosk_recognizer_final_result(rec_), true};
         }
+        // dirty hack, clients send their sampling rate this way, but
+        // this is not mapped to an API in Vosk, so filter it out here
         else if ((len < 100) && (strstr(message, "sample_rate") != NULL))
         {
+        	// careful, the buffer is sometimes not null-terminated!
         	std::cout << message << "\n";
         	return Chunk{vosk_recognizer_partial_result(rec_), false};
         }

@@ -13,6 +13,7 @@
 
 #include <portaudio.h>
 
+//////////////////////////////////////////////
 struct VoskModel
 {
 	int       instanceId;
@@ -21,6 +22,7 @@ struct VoskModel
 
 static int voskModelInstanceId = 1;
 
+//////////////////////////////////////////////
 struct VoskRecognizer
 {
 	int instanceId;
@@ -30,27 +32,57 @@ struct VoskRecognizer
 
 static int voskRecognizerInstanceId = 1;
 
-static VoskRecognizer dummyRecognizer;
-
-static int silence_ctr = 0;
-
+//////////////////////////////////////////////
+//
+// start dlabpro recognizer from here with these args
+//
+//////////////////////////////////////////////
 static char* recognizer_argv[] = {"", "-cfg", "recognizer.cfg", "-out", "vad"};  
 
 static void* recognizerThread(void* arg)
 {
 	recognizer_main((sizeof(recognizer_argv) / sizeof(char*)), ((char**) &recognizer_argv));
+	
+	return (void *) NULL;
 }
 
+/////////////////////////////////////////////////
+//
+// fields to remember during portaudio open()
+//
+//////////////////////////////////////////////
 static PaStreamCallback* audioStreamCallback;
 static void* audioStreamUserData;
 
+///////////////////////////////////////////////
+//
+// remember VAD status from recognizer
+//
+//////////////////////////////////////////////
 static int audioDecodingStatus = 0;
 
+
+///////////////////////////////////////////////
+//
+// buffer for feeding the portaudio callback
+//
+//////////////////////////////////////////////
 static float audioCallbackBuffer[PABUF_SIZE];
 static int audioCallbackBufferPtr = 0;
 
+///////////////////////////////////////////////
+//
+// buffer for the resulting JSON strings
+//
+//////////////////////////////////////////////
 static char resultBuffer[5000];
 
+///////////////////////////////////////////////
+//
+// tracking of the last active instance, because recognizer is
+// not (yet) capable of multiple instances
+//
+//////////////////////////////////////////////
 struct InstanceActivity
 {
 	int instanceId;
@@ -65,6 +97,12 @@ static struct InstanceActivity activeInstance
 	.activeTime         = { .tv_sec  = 0, .tv_usec = 0 }
 };
 
+///////////////////////////////////////////////
+//
+// check whether this instance is still active,
+// or whether we can "steal" the recognizer from an inactive instance
+//
+//////////////////////////////////////////////
 static int checkActiveInstance(VoskRecognizer *recognizer)
 {
 	struct timeval currTime;
@@ -99,6 +137,13 @@ static int checkActiveInstance(VoskRecognizer *recognizer)
 	return acceptInstance;
 }
 
+///////////////////////////////////////////////
+//
+// re-use the model API for spawning the recognizer
+// 
+// the vosk server spawns one model only, so this works
+//
+//////////////////////////////////////////////
 VoskModel *vosk_model_new(const char *model_path)
 {
 	VoskModel* instance;
@@ -125,6 +170,11 @@ VoskModel *vosk_model_new(const char *model_path)
 	return instance;
 }
 
+///////////////////////////////////////////////
+//
+// likely to be never called by the server
+// 
+//////////////////////////////////////////////
 void vosk_model_free(VoskModel *model)
 {
 	printf("vosk_model_free, instance=%d\n", model->instanceId);
@@ -147,6 +197,15 @@ void vosk_model_free(VoskModel *model)
 	voskModelInstanceId--;
 }
 
+///////////////////////////////////////////////
+//
+// every server session creates one recognizer instance
+//
+// e.g. one conference member == one session == one instance
+//
+// sample rate is set by the server (and defined as environment on the command line)
+// 
+//////////////////////////////////////////////
 VoskRecognizer *vosk_recognizer_new(VoskModel *model, float sample_rate)
 {
 	VoskRecognizer* instance;
@@ -162,6 +221,7 @@ VoskRecognizer *vosk_recognizer_new(VoskModel *model, float sample_rate)
 	return instance;
 }
 
+///////////////////////////////////////////////
 void vosk_recognizer_free(VoskRecognizer *recognizer)
 {
 	printf("vosk_recognizer_free, instance=%d\n", recognizer->instanceId);
@@ -171,16 +231,25 @@ void vosk_recognizer_free(VoskRecognizer *recognizer)
 	voskRecognizerInstanceId--;
 }
 
+///////////////////////////////////////////////
 void vosk_recognizer_set_max_alternatives(VoskRecognizer *recognizer, int max_alternatives)
 {
+	// stub
 	printf("vosk_recognizer_set_max_alternatives, instance=%d, max_alternatives=%d.\n", recognizer->instanceId, max_alternatives);
 }
 
+///////////////////////////////////////////////
 void vosk_recognizer_set_words(VoskRecognizer *recognizer, int words)
 {
+	// stub
 	printf("vosk_recognizer_set_words, instance=%d, words=%d.\n", recognizer->instanceId, words);
 }
 
+///////////////////////////////////////////////
+//
+// "main" function that handles almost everything 
+// 
+//////////////////////////////////////////////
 int vosk_recognizer_accept_waveform(VoskRecognizer *recognizer, const char *data, int length)
 {
 	int retVal;
@@ -193,7 +262,7 @@ int vosk_recognizer_accept_waveform(VoskRecognizer *recognizer, const char *data
 		data[4], data[5], data[6], data[7]);
 		*/
 	
-	// only serve the active instace
+	// only serve the active instance
 	if (checkActiveInstance(recognizer) == 1)
 	{
 		int idleCtr = recognizer_get_idle_counter();
@@ -208,12 +277,14 @@ int vosk_recognizer_accept_waveform(VoskRecognizer *recognizer, const char *data
 			printf("ACCEPT\n");
 			
 			// FIXME how to handle unaligned data?
+			// in real life jitsi sends aligned packets only 
 			while (dataLength < length)
 			{
+				// data from jitsi is 16 bit integers in little endian
 				short value = (short) ((data[dataLength] & 0xFF) | ((data[dataLength + 1] & 0xFF) << 8));
 				float fValue = (float) value;
 				
-				// float32 format for portaudio means values are between -1.0 and +1.0
+				// float32 format for portaudio means values are between -1.0 and +1.0, so do the scaling here
 				fValue /= 32768;
 				
 				/*
@@ -227,6 +298,7 @@ int vosk_recognizer_accept_waveform(VoskRecognizer *recognizer, const char *data
 				}
 				*/
 				
+				// only some sampling rates are supported at all				
 				if ((recognizer->inputSampleRate != 8000.0) && (recognizer->inputSampleRate != 16000.0)
 					&& (recognizer->inputSampleRate != 48000.0))
 				{
@@ -243,6 +315,7 @@ int vosk_recognizer_accept_waveform(VoskRecognizer *recognizer, const char *data
 					audioCallbackBufferPtr++;
 				}
 				
+				// emulate portaudio callback 
 				if (audioCallbackBufferPtr == PABUF_SIZE)
 				{
 					audioStreamCallback(audioCallbackBuffer, NULL, PABUF_SIZE, NULL, 0, audioStreamUserData);
@@ -252,15 +325,17 @@ int vosk_recognizer_accept_waveform(VoskRecognizer *recognizer, const char *data
 				
 				dataLength += 2;
 				
-				// do an ugly downsampling for 48Khz input rate
+				// do an ugly downsampling for 48Khz input rate (use one, skip 2)
 				if (recognizer->inputSampleRate == 48000.0)
 				{
 					dataLength += 4;					
 				}
 			}
 			
+			// there might be occasions where no data was sent to recognizer, so check that first to avoid an endless loop
 			if (callbackCalled != 0)
 			{
+				// emulate a blocking call, so check that the recognizer is busy first and then idle again 				
 				while (recognizer_get_busy_counter() == busyCtr)
 				{
 					printf("+");
@@ -277,6 +352,7 @@ int vosk_recognizer_accept_waveform(VoskRecognizer *recognizer, const char *data
 				}
 				printf("\n");
 	
+				// decide whether to announce a "final" result
 				if (recognizer_get_vad_status() == 1)
 				{
 					printf("O ");
@@ -325,6 +401,7 @@ int vosk_recognizer_accept_waveform(VoskRecognizer *recognizer, const char *data
 	return retVal;
 }
 
+////////////////////////////////////////////////
 const char *partial_result_text_empty="{ \"partial\" : \"\" }";
 
 const char *vosk_recognizer_partial_result(VoskRecognizer *recognizer)
@@ -351,6 +428,7 @@ const char *vosk_recognizer_partial_result(VoskRecognizer *recognizer)
 	}
 }
 
+////////////////////////////////////////////////
 const char *result_text_empty="{ \"text\" : \"\" }";
 
 const char *vosk_recognizer_result(VoskRecognizer *recognizer)
@@ -365,6 +443,7 @@ const char *vosk_recognizer_result(VoskRecognizer *recognizer)
 		printf("Result=%s.\n", recognizer_final_result());
 		
 		strcat(resultBuffer, "{ \"text\" : \"");
+		// decorate the "final" result
 		strcat(resultBuffer, "-- ");
 		strcat(resultBuffer, recognizer_final_result());
 		strcat(resultBuffer, " --");
@@ -380,10 +459,12 @@ const char *vosk_recognizer_result(VoskRecognizer *recognizer)
 	}
 }
 
+////////////////////////////////////////////////
 const char *vosk_recognizer_final_result(VoskRecognizer *recognizer)
 {
+	// no special handling required, just forward
 	printf("vosk_recognizer_final_result, instance=%d, modelInstaceId=%d\n", recognizer->instanceId, recognizer->modelInstanceId);
-	vosk_recognizer_result(recognizer);
+	return vosk_recognizer_result(recognizer);
 }
 
 //////////////////////////////////////////////////////////////////
@@ -397,6 +478,7 @@ PaDeviceIndex Pa_GetDeviceCount( void )
 	return 1;	
 }
 
+//////////////////////////////////////////////////////////////////
 static PaDeviceInfo pdInfo
 {
 	.structVersion = 2,
@@ -416,16 +498,21 @@ const PaDeviceInfo* Pa_GetDeviceInfo( PaDeviceIndex device )
 	return &pdInfo;
 }
 
+//////////////////////////////////////////////////////////////////
 PaError Pa_Initialize( void )
 {
+	// stub
 	return paNoError;
 }
 
+//////////////////////////////////////////////////////////////////
 PaError Pa_Terminate( void )
 {
+	// stub
 	return paNoError;
 }
 
+//////////////////////////////////////////////////////////////////
 PaError Pa_OpenStream( PaStream** stream,
                        const PaStreamParameters *inputParameters,
                        const PaStreamParameters *outputParameters,
@@ -445,7 +532,7 @@ PaError Pa_OpenStream( PaStream** stream,
 	return paNoError;
 }
 
-
+//////////////////////////////////////////////////////////////////
 PaError Pa_OpenDefaultStream( PaStream** stream,
                               int numInputChannels,
                               int numOutputChannels,
@@ -465,19 +552,23 @@ PaError Pa_OpenDefaultStream( PaStream** stream,
 	return paNoError;
 }
 
+//////////////////////////////////////////////////////////////////
 PaError Pa_CloseStream( PaStream *stream )
 {
+	// stub
 	return paNoError;
 }
 
+//////////////////////////////////////////////////////////////////
 PaError Pa_StartStream( PaStream *stream )
 {
+	// stub
 	return paNoError;
 }
 
+//////////////////////////////////////////////////////////////////
 PaError Pa_StopStream( PaStream *stream )
 {
+	// stub
 	return paNoError;
 }
-
-
